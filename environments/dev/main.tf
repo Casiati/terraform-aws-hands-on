@@ -30,7 +30,6 @@ provider "aws" {
   }
 }
 
-# --- M?dulo de Rede (VPC & Subnets Multi-AZ) ---
 module "vpc" {
   source = "../../modules/vpc"
 
@@ -41,4 +40,13 @@ module "vpc" {
   private_subnet_cidrs  = var.private_subnet_cidrs
   database_subnet_cidrs = var.database_subnet_cidrs
   enable_nat_gateway    = var.enable_nat_gateway
+}
+
+module "security" {
+  source = "../../modules/security"
+
+  environment = var.environment
+  vpc_id      = module.vpc.vpc_id
+  app_port    = var.app_port
+  db_port     = var.db_port
 }

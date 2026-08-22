@@ -4,7 +4,7 @@
 [![AWS Provider](https://img.shields.io/badge/AWS_Provider-~%3E5.0-FF9900?logo=amazon-web-services&logoColor=white)](https://registry.terraform.io/providers/hashicorp/aws/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Modular infrastructure as code repository provisioned on AWS using Terraform. Designed following multi-tier networking patterns, security isolation, and environment segregation.
+Modular infrastructure as code repository provisioned on AWS using Terraform. Designed following multi-tier networking patterns, least-privilege security groups, IAM roles, and environment segregation.
 
 ---
 
@@ -12,35 +12,27 @@ Modular infrastructure as code repository provisioned on AWS using Terraform. De
 
 ```mermaid
 flowchart TD
-    Internet((Internet)) <--> IGW[Internet Gateway]
+    Internet((Internet)) <-->|HTTP:80 / HTTPS:443| ALB_SG[ALB Security Group]
     
     subgraph VPC ["VPC: 10.0.0.0/16"]
         subgraph PublicTier ["Public Tier (ALB & NAT)"]
-            PublicSubnetA["Public Subnet A (10.0.1.0/24)"]
-            PublicSubnetB["Public Subnet B (10.0.2.0/24)"]
+            ALB_SG
             NAT["NAT Gateway (EIP)"]
         end
 
         subgraph PrivateTier ["Application Tier (ECS / EC2)"]
-            PrivateSubnetA["Private Subnet A (10.0.11.0/24)"]
-            PrivateSubnetB["Private Subnet B (10.0.12.0/24)"]
+            APP_SG[App Security Group]
+            APP_IAM[IAM Role: SSM + CloudWatch]
         end
 
         subgraph DatabaseTier ["Database Tier (RDS Multi-AZ)"]
-            DBSubnetA["Database Subnet A (10.0.21.0/24)"]
-            DBSubnetB["Database Subnet B (10.0.22.0/24)"]
+            DB_SG[Database Security Group]
         end
     end
 
-    IGW <--> PublicSubnetA
-    IGW <--> PublicSubnetB
-    PublicSubnetA --> NAT
-    
-    PrivateSubnetA -. Egress Traffic .-> NAT
-    PrivateSubnetB -. Egress Traffic .-> NAT
-
-    PrivateSubnetA <--> DBSubnetA
-    PrivateSubnetB <--> DBSubnetB
+    ALB_SG -->|Port 3000 only| APP_SG
+    APP_SG -->|Port 5432 only| DB_SG
+    APP_SG -. Outbound Egress .-> NAT
 ```
 
 ---
@@ -62,6 +54,9 @@ flowchart TD
 ?   ?   ??? variables.tf
 ?   ?   ??? outputs.tf
 ?   ??? security/
+?   ?   ??? main.tf
+?   ?   ??? variables.tf
+?   ?   ??? outputs.tf
 ?   ??? compute/
 ?   ??? database/
 ?   ??? monitoring/
@@ -78,25 +73,34 @@ Provisions a dedicated VPC across multiple availability zones with three distinc
 - **Private Subnets**: Routed through a NAT Gateway for secure outbound connectivity.
 - **Database Subnets**: Completely isolated without internet routing.
 
+### `security`
+Implements layered security controls following the principle of least privilege:
+- **`alb_sg`**: Accepts public inbound traffic on ports 80/443.
+- **`app_sg`**: Restricts inbound traffic strictly to the ALB security group on the application port.
+- **`db_sg`**: Restricts inbound database traffic strictly to the application security group.
+- **`app_role`**: IAM role configured with `AmazonSSMManagedInstanceCore` (eliminating open SSH ports) and `CloudWatchAgentServerPolicy`.
+
 #### Inputs
-| Name | Description | Type | Default |
-| :--- | :--- | :--- | :--- |
-| `vpc_cidr` | CIDR block for the VPC | `string` | `10.0.0.0/16` |
-| `environment` | Deployment environment identifier | `string` | - |
-| `availability_zones` | Target AZs for high availability | `list(string)` | `["us-east-1a", "us-east-1b"]` |
-| `public_subnet_cidrs` | CIDRs for public subnets | `list(string)` | `["10.0.1.0/24", "10.0.2.0/24"]` |
-| `private_subnet_cidrs` | CIDRs for private application subnets | `list(string)` | `["10.0.11.0/24", "10.0.12.0/24"]` |
-| `database_subnet_cidrs` | CIDRs for database subnets | `list(string)` | `["10.0.21.0/24", "10.0.22.0/24"]` |
-| `enable_nat_gateway` | Controls NAT Gateway provisioning | `bool` | `true` |
+| Module | Name | Description | Type | Default |
+| :--- | :--- | :--- | :--- | :--- |
+| `vpc` | `vpc_cidr` | CIDR block for the VPC | `string` | `10.0.0.0/16` |
+| `vpc` | `environment` | Deployment environment identifier | `string` | - |
+| `vpc` | `availability_zones` | Target AZs for high availability | `list(string)` | `["us-east-1a", "us-east-1b"]` |
+| `security` | `vpc_id` | Target VPC identifier | `string` | - |
+| `security` | `app_port` | Application exposed TCP port | `number` | `3000` |
+| `security` | `db_port` | Database TCP port | `number` | `5432` |
 
 #### Outputs
-| Name | Description |
-| :--- | :--- |
-| `vpc_id` | ID of the created VPC |
-| `public_subnet_ids` | IDs of public subnets |
-| `private_subnet_ids` | IDs of private subnets |
-| `database_subnet_ids` | IDs of isolated database subnets |
-| `nat_gateway_id` | ID of the NAT Gateway |
+| Module | Name | Description |
+| :--- | :--- | :--- |
+| `vpc` | `vpc_id` | ID of the created VPC |
+| `vpc` | `public_subnet_ids` | IDs of public subnets |
+| `vpc` | `private_subnet_ids` | IDs of private subnets |
+| `vpc` | `database_subnet_ids` | IDs of isolated database subnets |
+| `security` | `alb_security_group_id` | Security group ID for ALB |
+| `security` | `app_security_group_id` | Security group ID for Application |
+| `security` | `database_security_group_id` | Security group ID for Database |
+| `security` | `app_iam_role_arn` | ARN of the application IAM role |
 
 ---
 
